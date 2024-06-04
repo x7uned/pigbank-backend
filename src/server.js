@@ -1,53 +1,71 @@
-const fastify = require('fastify');
-const fastifyPostgres = require('@fastify/postgres');
-const fastifyCors = require('@fastify/cors');
-const dotenv = require('dotenv');
+import fastify from 'fastify';
+import fastifyJwt from '@fastify/jwt';
+import fastifyCors from '@fastify/cors';
+import dotenv from 'dotenv';
+import pkg from 'pg';
+import userRoutes from './routes/user.routes.js';
+import dataRoutes from './routes/stats.routes.js';
+import cardRoutes from './routes/card.routes.js';
+
+dotenv.config();
+
+const { Client } = pkg;
 
 const server = fastify({ logger: false });
-dotenv.config();
 
 const connectToDatabase = async () => {
     try {
-        await server.register(fastifyPostgres, {
+        const client = new Client({
             connectionString: process.env.DATABASE_URL,
         });
-        console.log(`DB OK`);
+
+        await client.connect();
+        console.log('Connected to the database');
+        return client;
     } catch (err) {
-        console.log(`DB ${err}`);
+        console.error(`Database connection error: ${err}`);
     }
-}
+};
 
-server.register(fastifyCors, {
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], // Разрешенные методы
-    allowedHeaders: ['Content-Type', 'Authorization'], // Разрешенные заголовки
-});
-
-connectToDatabase();
-
-server.get('/checkDB', async (request, reply) => {
-    const client = await server.pg.connect();
+const fixCORS = async () => {
     try {
-        const result = await client.query('SELECT * FROM User');
-        reply.send(result.rows);
-    } finally {
-        client.release();
+        await server.register(fastifyCors, {
+            origin: '*',
+            methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+            allowedHeaders: ['Content-Type', 'Authorization'],
+        });
+    } catch (error) {
+        console.log(`CORS Error: ${error}`);
     }
-});
+};
 
-server.get('/', async (request, reply) => {
-    reply.send({ message: 'Fastify Server by x7uned' });
-});
-
-server.post('/auth/reg', async (request, reply) => {
-    const requestBody = request.body;
-    reply.send({ message: 'Received', data: requestBody });
-});
-
-server.listen({ port: 2722, host: 'localhost' }, (err, address) => {
-    if (err) {
-        server.log.error(err);
-        process.exit(1);
+const jwtReg = async () => {
+    try {
+        await server.register(fastifyJwt, {
+            secret: process.env.JWT_TOKEN,
+        });
+    } catch (error) {
+        console.log(`jwtReg Error: ${error}`);
     }
-    console.log(`Server listening on ${address}`);
-});
+};
+
+const startServer = async () => {
+    const clientDB = await connectToDatabase();
+
+    await fixCORS();
+    await jwtReg();
+
+    userRoutes(server, clientDB);
+    dataRoutes(server, clientDB);
+    cardRoutes(server, clientDB);
+
+    server.listen({ port: 2722, host: 'localhost' }, (err, address) => {
+        if (err) {
+            server.log.error(err);
+            process.exit(1);
+        }
+        console.log(`Server listening on ${address}`);
+    });
+};
+
+startServer();
