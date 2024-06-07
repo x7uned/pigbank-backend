@@ -119,13 +119,14 @@ export const sendMoney = async (request, reply, clientDB) => {
             return reply.status(400).send({ message: 'Body is missing' });
         }
 
-        const { addresserNumber, receiverNumber, sum } = request.body;
+        const { addresserNumber, receiverNumber, sum, comment } = request.body;
         const transactionDate = new Date();
+        const userId = request.userId;
 
         await clientDB.query('BEGIN');
 
-        const addresserDataFetch = await clientDB.query('SELECT card_name, card_number, balance_value FROM card_data WHERE card_number = $1', [addresserNumber]);
-        const receiverDataFetch = await clientDB.query('SELECT card_name, card_number, balance_value FROM card_data WHERE card_number = $1', [receiverNumber]);
+        const addresserDataFetch = await clientDB.query('SELECT card_name, card_number, card_design, balance_value, transactions FROM card_data WHERE card_number = $1', [addresserNumber]);
+        const receiverDataFetch = await clientDB.query('SELECT card_name, card_number, card_design, balance_value, transactions FROM card_data WHERE card_number = $1', [receiverNumber]);
 
         if (addresserDataFetch.rowCount === 0 || receiverDataFetch.rowCount === 0) {
             await clientDB.query('ROLLBACK');
@@ -137,11 +138,47 @@ export const sendMoney = async (request, reply, clientDB) => {
 
         if (addresserData.balance_value < sum) {
             await clientDB.query('ROLLBACK');
-            return reply.status(400).send({ message: 'Insufficient balance' });
+            return reply.code(400).send({ message: 'Insufficient balance' });
         }
 
-        await clientDB.query('UPDATE card_data SET balance_value = balance_value - $1 WHERE card_number = $2', [sum, addresserNumber]);
-        await clientDB.query('UPDATE card_data SET balance_value = balance_value + $1 WHERE card_number = $2', [sum, receiverNumber]);
+        if (addresserData.card_number == receiverData.card_number) {
+            await clientDB.query('ROLLBACK');
+            return reply.code(408).send({ message: 'Invalid number' });
+        }
+
+        const transactionAddresser = {
+            title: `${receiverData.card_name}`,
+            text: `Sent: ${comment}`,
+            logo: `${receiverData.card_name.slice(0,1)}`,
+            date: transactionDate,
+            cost: (sum * -1)
+        };
+
+        const transactionReceiver = {
+            title: `${addresserData.card_name}`,
+            text: `Received: ${comment}`,
+            logo: `${addresserData.card_name.slice(0,1)}`,
+            date: transactionDate,
+            cost: sum
+        };
+
+        const contactsAddresser = {
+            name: `${receiverData.card_name}`,
+            avatar: `${receiverData.card_design}`,
+            number: `${receiverData.card_number}`
+        };
+
+        await clientDB.query('UPDATE card_data SET balance_value = balance_value - $1, transactions = array_append(transactions, $2) WHERE card_number = $3', [sum, transactionAddresser, addresserNumber]);
+        await clientDB.query('UPDATE card_data SET balance_value = balance_value + $1, transactions = array_append(transactions, $2) WHERE card_number = $3', [sum, transactionReceiver, receiverNumber]);
+
+        const contactsFetch = await clientDB.query('SELECT contacts FROM owner_data WHERE owner_id = $1', [userId]);
+        const currentContacts = contactsFetch.rows[0].contacts;
+
+        const contactExists = currentContacts.some(contact => contact.number === receiverNumber);
+
+        if (!contactExists) {
+            await clientDB.query('UPDATE owner_data SET contacts = array_append(contacts, $1) WHERE owner_id = $2', [contactsAddresser, userId]);
+        }
 
         await clientDB.query('COMMIT');
 
@@ -150,6 +187,7 @@ export const sendMoney = async (request, reply, clientDB) => {
     } catch (error) {
         await clientDB.query('ROLLBACK');
         console.error('Error transaction:', error);
-        reply.status(500).send({ message: 'Transaction error' });
+        reply.code(500).send({ message: 'Transaction error' });
     }
-}
+};
+
