@@ -1,4 +1,4 @@
-import { addCard, createCard, getCard } from '../service/card.service.js';
+import { addCard, changePIN, createCard, getCard } from '../service/card.service.js';
 import handleValidationErrors from '../utils/handleValidationErrors.js';
 import isAuth from '../utils/isAuth.js';
 
@@ -17,5 +17,10 @@ export default function cardRoutes(server, clientDB) {
     server.get('/cards/get', {
         preHandler: [isAuth],
         handler: (request, reply) => getCard(request, reply, clientDB),
+    });
+
+    server.post('/cards/updatepin', {
+        preHandler: [isAuth],
+        handler: (request, reply) => changePIN(request,reply,clientDB)
     })
 }

@@ -8,7 +8,7 @@ export const addCard = async (request, reply, clientDB) => {
 
         const { card_number, card_pin } = request.body;
         const id = request.userId;
-
+        
         const fetchResult = await clientDB.query('SELECT * FROM card_data WHERE card_number = $1', [card_number]);
         const card = fetchResult.rows[0];
 
@@ -58,7 +58,7 @@ export const getCard = async (request, reply, clientDB) => {
         const owner_id = request.userId;
 
         const findUserReq = await clientDB.query('SELECT * FROM owner_data WHERE owner_id = $1', [owner_id]);
-        const findUser = findUserReq.rows[0]
+        const findUser = findUserReq.rows[0];
 
         const selectedCardId = String(findUser.selected_card);
 
@@ -77,6 +77,45 @@ export const getCard = async (request, reply, clientDB) => {
         console.error(error);
         reply.status(500).send({
             message: 'Internal server error #card',
+        });
+    }
+}
+
+export const changePIN = async (request, reply, clientDB) => {
+    try {
+        if (!request.body) {
+            return reply.status(400).send({ message: 'Body is missing' });
+        }
+
+        const { id, new_pin, old_pin } = request.body;
+
+        const fetchCard = await clientDB.query('SELECT card_pin FROM card_data WHERE id = $1', [id]);
+        const card = fetchCard.rows[0];
+
+        if (!card) {
+            return reply.code(404).send({ message: 'Card not found' });
+        }
+
+        const card_pin_str = String(card.card_pin);
+        const old_pin_str = String(old_pin);
+        const new_pin_str = String(new_pin)
+        const isPINCorrect = await bcrypt.compare(old_pin_str, card_pin_str);
+
+        if (!isPINCorrect) {
+            console.log(old_pin,card_pin_str)
+            return reply.code(401).send({ message: 'Incorrect pin code' });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const hash = await bcrypt.hash(new_pin_str, salt);
+
+        await clientDB.query('UPDATE card_data SET card_pin = $1 WHERE id = $2', [hash, id]);
+
+        reply.send({ message: 'PIN updated successfuly', success: true });
+    } catch (error) {
+        console.error(error);
+        reply.status(500).send({
+            message: 'Internal server error #changePIN',
         });
     }
 }
